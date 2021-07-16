@@ -15,6 +15,7 @@
             cp libgourou.so $out/lib
             cp utils/{activate,acsmdownloader} $out/bin
         '';
+        dontWrapQtApps = true;
       };
 
   };
