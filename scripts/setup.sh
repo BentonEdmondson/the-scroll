@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Pugixml
 git clone https://github.com/zeux/pugixml.git lib/pugixml
