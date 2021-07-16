@@ -9,7 +9,7 @@
       pkgs.stdenv.mkDerivation {
         name = "hello";
         src = self;
-        buildInputs = [ pkgs.pkg-config pkgs.openssl pkgs.qt5.qtbase pkgs.libzip ];
+        buildInputs = [ pkgs.pkg-config pkgs.openssl pkgs.qt5.qtbase pkgs.libzip pkgs.pugixml ];
         installPhase = ''
             mkdir -p $out/bin $out/lib
             cp libgourou.so $out/lib

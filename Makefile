@@ -2,7 +2,7 @@
 AR ?= $(CROSS)ar
 CXX ?= $(CROSS)g++
 
-CXXFLAGS=-Wall -fPIC -I./include -I./lib -I./lib/pugixml/src/
+CXXFLAGS=-Wall -fPIC -I./include -I./lib -lpugixml
 LDFLAGS=
 
 ifneq ($(DEBUG),)
@@ -18,7 +18,7 @@ TARGETDIR   := bin
 SRCEXT      := cpp
 OBJEXT      := o
 
-SOURCES=src/libgourou.cpp src/user.cpp src/device.cpp src/fulfillment_item.cpp src/bytearray.cpp src/pugixml.cpp
+SOURCES=src/libgourou.cpp src/user.cpp src/device.cpp src/fulfillment_item.cpp src/bytearray.cpp
 OBJECTS     := $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT)))
 
 .PHONY: utils
