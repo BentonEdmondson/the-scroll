@@ -1,8 +1,0 @@
-obj
-lib
-*.a
-*.so
-*~
-utils/acsmdownloader
-utils/activate
-.adept

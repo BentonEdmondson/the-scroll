@@ -27,7 +27,7 @@ all: lib obj libgourou utils
 
 lib:
 	mkdir lib
-	./scripts/setup.sh
+	#./scripts/setup.sh
 
 obj:
 	mkdir obj
