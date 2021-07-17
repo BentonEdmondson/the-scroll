@@ -1,6 +1,6 @@
 # libgourou-utils
 
-libgourou is a library created by Grégory Soutadé located [here](http://indefero.soutade.fr/p/libgourou/). It exposes utility binaries to utilize the library. Here I have packaged those up with the [Nix package manager](https://en.m.wikipedia.org/wiki/Nix_package_manager) with as few changes as possible. The original code was licensed under GPLv3, and this code is licensed under GPLv3. The original README is below.
+libgourou is a library created by Grégory Soutadé located [here](http://indefero.soutade.fr/p/libgourou/). It exposes utility binaries to utilize the library. Here I have packaged those up with the [Nix package manager](https://en.m.wikipedia.org/wiki/Nix_package_manager) with as few changes as possible. The original code was licensed under LGPLv3, and this code is licensed under LGPLv3. The original README is below.
 
 ---
 
