@@ -1,13 +1,12 @@
 {
-  description = "A flake for building Hello World";
-
   inputs.nixpkgs.url = github:NixOS/nixpkgs/master;
 
   outputs = { self, nixpkgs }: let pkgs = import nixpkgs { system = "x86_64-linux"; }; in {
 
     defaultPackage.x86_64-linux =
       pkgs.stdenv.mkDerivation {
-        name = "hello";
+        pname = "libgourou-utils";
+        version = "0.1";
         src = self;
         buildInputs = [ pkgs.pkg-config pkgs.openssl pkgs.qt5.qtbase pkgs.libzip pkgs.pugixml ];
         installPhase = ''
