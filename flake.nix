@@ -8,7 +8,8 @@
         pname = "libgourou-utils";
         version = "0.1";
         src = self;
-        buildInputs = [ nixpkgs.pkg-config nixpkgs.openssl nixpkgs.qt5.qtbase nixpkgs.libzip nixpkgs.pugixml ];
+        nativeBuildInputs = [ nixpkgs.pkg-config ];
+        buildInputs = [ nixpkgs.openssl nixpkgs.qt5.qtbase nixpkgs.libzip nixpkgs.pugixml ];
         installPhase = ''
             mkdir -p $out/bin $out/lib
             cp libgourou.so $out/lib
