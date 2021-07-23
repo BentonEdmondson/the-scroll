@@ -1,6 +1,12 @@
 # libgourou-utils
 
-libgourou is a library created by Grégory Soutadé located [here](http://indefero.soutade.fr/p/libgourou/). It exposes utility binaries to utilize the library. Here I have packaged those up with the [Nix package manager](https://en.m.wikipedia.org/wiki/Nix_package_manager) with as few changes as possible. The original code was licensed under LGPLv3, and this code is licensed under LGPLv3. The original README is below.
+libgourou is a library created by Grégory Soutadé located [here](http://indefero.soutade.fr/p/libgourou/). It exposes utility binaries to utilize the library. Here I have packaged the entire project up with the [Nix package manager](https://en.m.wikipedia.org/wiki/Nix_package_manager) with as few changes as possible.
+
+The library is licensed under LGPLv3 or later and the utilities are licensed under the 3-clause BSD license, so I will operate as if the entire project is under LGPLv3 because it is more restrictive than the 3-clause BSD license. The LGPLv3 requires that I disclose the dates and contents of all changes made to the original software. These can be found in the [commit history](https://github.com/BentonEdmondson/libgourou-utils/commits/main).
+
+I packaged the library for use in my CLI application called [Knock](https://github.com/BentonEdmondson/knock).
+
+The original README is below.
 
 ---
 
