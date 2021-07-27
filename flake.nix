@@ -13,7 +13,7 @@
         installPhase = ''
             mkdir -p $out/bin $out/lib
             cp libgourou.so $out/lib
-            cp utils/activate $out/bin/adept-register
+            cp utils/adept_activate $out/bin/adept-register
             cp utils/acsmdownloader $out/bin/adept-download
         '';
         dontWrapQtApps = true;
