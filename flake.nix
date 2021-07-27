@@ -6,7 +6,7 @@
   in {
     defaultPackage.x86_64-linux = nixpkgs.stdenv.mkDerivation {
         pname = "libgourou-utils";
-        version = "0.1";
+        version = "0.3.1";
         src = self;
         nativeBuildInputs = [ nixpkgs.pkg-config ];
         buildInputs = [ nixpkgs.openssl nixpkgs.qt5.qtbase nixpkgs.libzip nixpkgs.pugixml ];
