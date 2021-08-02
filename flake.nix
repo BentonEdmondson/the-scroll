@@ -17,6 +17,18 @@
             cp utils/acsmdownloader $out/bin/adept-download
         '';
         dontWrapQtApps = true;
+
+        meta = {
+          description = "An implementation of Adobe ADEPT for Linux";
+          homepage = "https://github.com/BentonEdmondson/libgourou-utils";
+          license = [ nixpkgs.lib.licenses.lgpl3Plus nixpkgs.lib.licenses.bsd3 ];
+          maintainers = [{
+            name = "Benton Edmondson";
+            email = "bentonedmondson@gmail.com";
+          }];
+          # potentially others, but I'm only listed those tested
+          platforms = [ "x86_64-linux" ];
+        };
       };
   };
 }
