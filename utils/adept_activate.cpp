@@ -170,10 +170,6 @@ static const char* abspath(const char* filename)
 
 int main(int argc, char** argv)
 {
-    std::string stringPassword;
-    std::cin >> stringPassword;
-    password = stringPassword.c_str();
-
     int c, ret = -1;
     const char* _outputDir = outputDir;
     int verbose = gourou::DRMProcessor::getLogLevel();
