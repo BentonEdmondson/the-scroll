@@ -46,6 +46,7 @@ static const char* deviceFile     = "device.xml";
 static const char* activationFile = "activation.xml";
 static const char* devicekeyFile  = "devicesalt";
 static const char* acsmFile       = 0;
+static       bool  exportPrivateKey = false;
 static const char* outputFile     = 0;
 static const char* outputDir      = 0;
 static const char* defaultDirs[]  = {
@@ -66,43 +67,77 @@ public:
    
     void run()
     {
+	int ret = 0;
 	try
 	{
 	    DRMProcessorClientImpl client;
 	    gourou::DRMProcessor processor(&client, deviceFile, activationFile, devicekeyFile);
-
-	    gourou::FulfillmentItem* item = processor.fulfill(acsmFile);
-
-	    std::string filename;
-	    if (!outputFile)
+	    gourou::User* user = processor.getUser();
+	    
+	    if (exportPrivateKey)
 	    {
-		filename = item->getMetadata("title");
-		if (filename == "")
-		    filename = "output.epub";
-		else
-		    filename += ".epub";
+		std::string filename;
+		if (!outputFile)
+		    filename = std::string("Adobe_PrivateLicenseKey--") + user->getUsername() + ".der";
+	    
+		if (outputDir)
+		{
+		    QDir dir(outputDir);
+		    if (!dir.exists(outputDir))
+			dir.mkpath(outputDir);
+		    
+		    filename = std::string(outputDir) + "/" + filename;
+		}
+
+		processor.exportPrivateLicenseKey(filename);
+
+		std::cout << "Private license key exported to " << filename << std::endl;
 	    }
 	    else
-		filename = outputFile;
-	    
-	    if (outputDir)
 	    {
-		QDir dir(outputDir);
-		if (!dir.exists(outputDir))
-		    dir.mkpath(outputDir);
+		gourou::FulfillmentItem* item = processor.fulfill(acsmFile);
 
-		filename = std::string(outputDir) + "/" + filename;
-	    }
+		std::string filename;
+		if (!outputFile)
+		{
+		    filename = item->getMetadata("title");
+		    if (filename == "")
+			filename = "output";
+		}
+		else
+		    filename = outputFile;
 	    
-	    processor.download(item, filename);
-	    std::cout << "Created " << filename << std::endl;
+		if (outputDir)
+		{
+		    QDir dir(outputDir);
+		    if (!dir.exists(outputDir))
+			dir.mkpath(outputDir);
+
+		    filename = std::string(outputDir) + "/" + filename;
+		}
+	    
+		gourou::DRMProcessor::ITEM_TYPE type = processor.download(item, filename);
+
+		if (!outputFile)
+		{
+		    std::string finalName = filename;
+		    if (type == gourou::DRMProcessor::ITEM_TYPE::PDF)
+			finalName += ".pdf";
+		    else
+			finalName += ".epub";
+		    QDir dir;
+		    dir.rename(filename.c_str(), finalName.c_str());
+		    filename = finalName;
+		}
+		std::cout << "Created " << filename << std::endl;
+	    }
 	} catch(std::exception& e)
 	{
 	    std::cout << e.what() << std::endl;
-	    this->app->exit(1);
+	    ret = 1;
 	}
 
-	this->app->exit(0);
+	this->app->exit(ret);
     }
 
 private:
@@ -138,14 +173,15 @@ static void usage(const char* cmd)
 {
     std::cout << "Download EPUB file from ACSM request file" << std::endl;
     
-    std::cout << "Usage: " << cmd << " [(-d|--device-file) device.xml] [(-a|--activation-file) activation.xml] [(-s|--device-key-file) devicesalt] [(-O|--output-dir) dir] [(-o|--output-file) output.epub] [(-v|--verbose)] [(-h|--help)] (-f|--acsm-file) file.acsm" << std::endl << std::endl;
+    std::cout << "Usage: " << cmd << " [(-d|--device-file) device.xml] [(-a|--activation-file) activation.xml] [(-s|--device-key-file) devicesalt] [(-O|--output-dir) dir] [(-o|--output-file) output(.epub|.pdf|.der)] [(-v|--verbose)] [(-h|--help)] (-f|--acsm-file) file.acsm|(-e|--export-private-key)" << std::endl << std::endl;
     
     std::cout << "  " << "-d|--device-file"     << "\t"   << "device.xml file from eReader" << std::endl;
     std::cout << "  " << "-a|--activation-file" << "\t"   << "activation.xml file from eReader" << std::endl;
     std::cout << "  " << "-k|--device-key-file" << "\t"   << "private device key file (eg devicesalt/devkey.bin) from eReader" << std::endl;
     std::cout << "  " << "-O|--output-dir"      << "\t"   << "Optional output directory were to put result (default ./)" << std::endl;
-    std::cout << "  " << "-o|--output-file"     << "\t"   << "Optional output epub filename (default <title.epub>)" << std::endl;
+    std::cout << "  " << "-o|--output-file"     << "\t"   << "Optional output filename (default <title.(epub|pdf|der)>)" << std::endl;
     std::cout << "  " << "-f|--acsm-file"       << "\t"   << "ACSM request file for epub download" << std::endl;
+    std::cout << "  " << "-e|--export-private-key"<< "\t" << "Export private key in DER format" << std::endl;
     std::cout << "  " << "-v|--verbose"         << "\t\t" << "Increase verbosity, can be set multiple times" << std::endl;
     std::cout << "  " << "-V|--version"         << "\t\t" << "Display libgourou version" << std::endl;
     std::cout << "  " << "-h|--help"            << "\t\t" << "This help" << std::endl;
@@ -174,13 +210,14 @@ int main(int argc, char** argv)
 	    {"output-dir",       required_argument, 0,  'O' },
 	    {"output-file",      required_argument, 0,  'o' },
 	    {"acsm-file",        required_argument, 0,  'f' },
+	    {"export-private-key",no_argument,      0,  'e' },
 	    {"verbose",          no_argument,       0,  'v' },
 	    {"version",          no_argument,       0,  'V' },
 	    {"help",             no_argument,       0,  'h' },
 	    {0,                  0,                 0,  0 }
 	};
 
-	c = getopt_long(argc, argv, "d:a:k:O:o:f:vVh",
+	c = getopt_long(argc, argv, "d:a:k:O:o:f:evVh",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -204,6 +241,9 @@ int main(int argc, char** argv)
 	case 'o':
 	    outputFile = optarg;
 	    break;
+	case 'e':
+	    exportPrivateKey = true;
+	    break;
 	case 'v':
 	    verbose++;
 	    break;
@@ -221,7 +261,7 @@ int main(int argc, char** argv)
    
     gourou::DRMProcessor::setLogLevel(verbose);
 
-    if (!acsmFile || (outputDir && !outputDir[0]) ||
+    if ((!acsmFile && !exportPrivateKey) || (outputDir && !outputDir[0]) ||
 	(outputFile && !outputFile[0]))
     {
 	usage(argv[0]);
@@ -232,23 +272,40 @@ int main(int argc, char** argv)
     ACSMDownloader downloader(&app);
 
     int i;
+    bool hasErrors = false;
+    const char* orig;
     for (i=0; i<(int)ARRAY_SIZE(files); i++)
     {
+	orig = *files[i];
 	*files[i] = findFile(*files[i]);
 	if (!*files[i])
 	{
-	    std::cout << "Error : " << *files[i] << " doesn't exists" << std::endl;
+	    std::cout << "Error : " << orig << " doesn't exists, did you activate your device ?" << std::endl;
+	    ret = -1;
+	    hasErrors = true;
+	}
+    }
+
+    if (hasErrors)
+	goto end;
+    
+    if (exportPrivateKey)
+    {
+	if (acsmFile)
+	{
+	    usage(argv[0]);
+	    return -1;
+	}
+    }
+    else
+    {
+	QFile file(acsmFile);
+	if (!file.exists())
+	{
+	    std::cout << "Error : " << acsmFile << " doesn't exists" << std::endl;
 	    ret = -1;
 	    goto end;
 	}
-    }
-    
-    QFile file(acsmFile);
-    if (!file.exists())
-    {
-	std::cout << "Error : " << acsmFile << " doesn't exists" << std::endl;
-	ret = -1;
-	goto end;
     }
     
     QThreadPool::globalInstance()->start(&downloader);

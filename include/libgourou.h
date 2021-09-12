@@ -14,7 +14,7 @@
   GNU Lesser General Public License for more details.
 
   You should have received a copy of the GNU Lesser General Public License
-  along with libgourou.  If not, see <http://www.gnu.org/licenses/>.
+  along with libgourou. If not, see <http://www.gnu.org/licenses/>.
 */
 
 #ifndef _LIBGOUROU_H_
@@ -40,7 +40,7 @@
 #define ACS_SERVER              "http://adeactivate.adobe.com/adept"
 #endif
 
-#define LIBGOUROU_VERSION       "0.3.1"
+#define LIBGOUROU_VERSION       "0.4"
 
 namespace gourou
 {
@@ -53,6 +53,7 @@ namespace gourou
 
 	static const std::string VERSION;
 
+	enum ITEM_TYPE { EPUB=0, PDF };
 	/**
 	 * @brief Main constructor. To be used once all is configured (user has signedIn, device is activated)
 	 *
@@ -80,8 +81,10 @@ namespace gourou
 	 *
 	 * @param item            Item from fulfill() method
 	 * @param path            Output file path 
+	 *
+	 * @return Type of downloaded item
 	 */
-	void download(FulfillmentItem* item, std::string path);
+	ITEM_TYPE download(FulfillmentItem* item, std::string path);
 
 	/**
 	 * @brief SignIn into ACS Server (required to activate device)
@@ -130,8 +133,11 @@ namespace gourou
 	 * @param URL            HTTP URL
 	 * @param POSTData       POST data if needed, if not set, a GET request is done
 	 * @param contentType    Optional content type of POST Data
+	 * @param responseHeaders Optional Response headers of HTTP request
+	 *
+	 * @return data of HTTP response
 	 */
-	ByteArray sendRequest(const std::string& URL, const std::string& POSTData=std::string(), const char* contentType=0);
+	ByteArray sendRequest(const std::string& URL, const std::string& POSTData=std::string(), const char* contentType=0, std::map<std::string, std::string>* responseHeaders=0);
 
 	/**
 	 * @brief Send HTTP POST request to URL with document as POSTData
@@ -158,6 +164,8 @@ namespace gourou
 	 */
 	std::string serializeRSAPrivateKey(void* rsa);
 
+	void exportPrivateLicenseKey(std::string path);
+	
 	/**
 	 * @brief Get current user
 	 */
@@ -194,6 +202,8 @@ namespace gourou
 	void buildActivateReq(pugi::xml_document& activateReq);
 	ByteArray sendFulfillRequest(const pugi::xml_document& document, const std::string& url);
 	void buildSignInRequest(pugi::xml_document& signInRequest, const std::string& adobeID, const std::string& adobePassword, const std::string& authenticationCertificate);
+	void fetchLicenseServiceCertificate(const std::string& licenseURL,
+					    const std::string& operatorURL);
     };
 }
 

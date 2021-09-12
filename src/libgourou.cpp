@@ -14,13 +14,15 @@
   GNU Lesser General Public License for more details.
 
   You should have received a copy of the GNU Lesser General Public License
-  along with libgourou.  If not, see <http://www.gnu.org/licenses/>.
+  along with libgourou. If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <time.h>
 #include <vector>
+
+#include <uPDFParser.h>
 
 #include <libgourou.h>
 #include <libgourou_common.h>
@@ -32,6 +34,7 @@
 #define ASN_END_TAG     0x03
 #define ASN_TEXT        0x04
 #define ASN_ATTRIBUTE   0x05
+
 
 namespace gourou
 {
@@ -298,11 +301,11 @@ namespace gourou
 	appendTextElem(root, "adept:expiration", buffer);
     }
     
-    ByteArray DRMProcessor::sendRequest(const std::string& URL, const std::string& POSTdata, const char* contentType)
+    ByteArray DRMProcessor::sendRequest(const std::string& URL, const std::string& POSTdata, const char* contentType, std::map<std::string, std::string>* responseHeaders)
     {
 	if (contentType == 0)
 	    contentType = "";
-	std::string reply = client->sendHTTPRequest(URL, POSTdata, contentType);
+	std::string reply = client->sendHTTPRequest(URL, POSTdata, contentType, responseHeaders);
 
 	pugi::xml_document replyDoc;
 	replyDoc.load_buffer(reply.c_str(), reply.length());
@@ -453,6 +456,49 @@ namespace gourou
 	appendTextElem(activationToken, "adept:device", user->getDeviceUUID());
     }
 
+    void DRMProcessor::fetchLicenseServiceCertificate(const std::string& licenseURL,
+						      const std::string& operatorURL)
+    {
+	if (user->getLicenseServiceCertificate(licenseURL) != "")
+	    return;
+
+	std::string licenseServiceInfoReq = operatorURL + "/LicenseServiceInfo?licenseURL=" + licenseURL;
+	
+	ByteArray replyData;
+	replyData = sendRequest(licenseServiceInfoReq);
+
+	pugi::xml_document licenseServicesDoc;
+	licenseServicesDoc.load_buffer(replyData.data(), replyData.length());
+
+	// Add new license certificate
+	pugi::xml_document activationDoc;
+	user->readActivation(activationDoc);
+
+	pugi::xml_node root;
+	pugi::xpath_node xpathRes = activationDoc.select_node("//adept:licenseServices");
+
+	// Create adept:licenseServices if it doesn't exists
+	if (!xpathRes)
+	{
+	    xpathRes = activationDoc.select_node("/activationInfo");
+	    root = xpathRes.node();
+	    root = root.append_child("adept:licenseServices");
+	    root.append_attribute("xmlns:adept") = ADOBE_ADEPT_NS;
+	}
+	else
+	    root = xpathRes.node();
+
+	root = root.append_child("adept:licenseServiceInfo");
+
+	std::string certificate = extractTextElem(licenseServicesDoc,
+						  "/licenseServiceInfo/certificate");
+
+	appendTextElem(root, "adept:licenseURL", licenseURL);
+	appendTextElem(root, "adept:certificate", certificate);
+
+	user->updateActivationFile(activationDoc);
+    }
+    
     FulfillmentItem* DRMProcessor::fulfill(const std::string& ACSMFile)
     {
 	if (!user->getPKCS12().length())
@@ -495,15 +541,16 @@ namespace gourou
 	    EXCEPTION(FF_NO_OPERATOR_URL, "OperatorURL not found in ACSM document");
 	
 	std::string operatorURL = node.node().first_child().value();
-	operatorURL = trim(operatorURL) + "/Fulfill";
+	operatorURL = trim(operatorURL);
+	std::string fulfillURL = operatorURL + "/Fulfill";
 
-	operatorAuth(operatorURL);
+	operatorAuth(fulfillURL);
 	
 	ByteArray replyData;
 
 	try
 	{
-	    replyData = sendRequest(fulfillReq, operatorURL);
+	    replyData = sendRequest(fulfillReq, fulfillURL);
 	}
 	catch (gourou::Exception& e)
 	{
@@ -515,8 +562,8 @@ namespace gourou
 	    if (e.getErrorCode() == GOUROU_ADEPT_ERROR &&
 		errorMsg.find("E_ADEPT_DISTRIBUTOR_AUTH") != std::string::npos)
 	    {
-		doOperatorAuth(operatorURL);
-		replyData = sendRequest(fulfillReq, operatorURL);
+		doOperatorAuth(fulfillURL);
+		replyData = sendRequest(fulfillReq, fulfillURL);
 	    }
 	    else
 	    {
@@ -527,16 +574,24 @@ namespace gourou
 	pugi::xml_document fulfillReply;
 
 	fulfillReply.load_string((const char*)replyData.data());
+
+	std::string licenseURL = extractTextElem(fulfillReply, "//licenseToken/licenseURL");
 	
+	fetchLicenseServiceCertificate(licenseURL, operatorURL);
+
 	return new FulfillmentItem(fulfillReply, user);
     }
 
-    void DRMProcessor::download(FulfillmentItem* item, std::string path)
+    DRMProcessor::ITEM_TYPE DRMProcessor::download(FulfillmentItem* item, std::string path)
     {
+	ITEM_TYPE res = EPUB;
+	
 	if (!item)
 	    EXCEPTION(DW_NO_ITEM, "No item");
+
+	std::map<std::string, std::string> headers;
 	
-	ByteArray replyData = sendRequest(item->getDownloadURL());
+	ByteArray replyData = sendRequest(item->getDownloadURL(), "", 0, &headers);
 
 	writeFile(path, replyData);
 
@@ -544,9 +599,53 @@ namespace gourou
 
 	std::string rightsStr = item->getRights();
 
-	void* handler = client->zipOpen(path);
-	client->zipWriteFile(handler, "META-INF/rights.xml", rightsStr);
-	client->zipClose(handler);
+	if (headers.count("Content-Type") && headers["Content-Type"] == "application/pdf")
+	    res = PDF;
+
+	if (res == EPUB)
+	{
+	    void* handler = client->zipOpen(path);
+	    client->zipWriteFile(handler, "META-INF/rights.xml", rightsStr);
+	    client->zipClose(handler);
+	}
+	else if (res == PDF)
+	{
+	    uPDFParser::Parser parser;
+
+	    try
+	    {
+		GOUROU_LOG(DEBUG, "Parse PDF");
+		parser.parse(path);
+	    }
+	    catch(std::invalid_argument& e)
+	    {
+		GOUROU_LOG(ERROR, "Invalid PDF");
+		return res;
+	    }
+
+	    std::vector<uPDFParser::Object*> objects = parser.objects();
+	    std::vector<uPDFParser::Object*>::reverse_iterator it;
+
+	    for(it = objects.rbegin(); it != objects.rend(); it++)
+	    {
+		// Update EBX_HANDLER with rights
+		if ((*it)->hasKey("Filter") && (**it)["Filter"]->str() == "/EBX_HANDLER")
+		{
+		    uPDFParser::Object* ebx = (*it)->clone();
+		    (*ebx)["ADEPT_ID"] = new uPDFParser::String(item->getResource());
+		    (*ebx)["EBX_BOOKID"] = new uPDFParser::String(item->getResource());
+		    ByteArray zipped;
+		    client->deflate(rightsStr, zipped);
+		    (*ebx)["ADEPT_LICENSE"] = new uPDFParser::String(zipped.toBase64());
+		    parser.addObject(ebx);
+		    break;
+		}
+	    }
+
+	    parser.write(path, true);
+	}
+
+	return res;
     }
 
     void DRMProcessor::buildSignInRequest(pugi::xml_document& signInRequest,
@@ -798,6 +897,19 @@ namespace gourou
 	free(data);
 	
 	return res.toBase64();
+    }
+
+    void DRMProcessor::exportPrivateLicenseKey(std::string path)
+    {
+	int fd = open(path.c_str(), O_CREAT|O_TRUNC|O_WRONLY, S_IRWXU);
+	if (fd <= 0)
+	    EXCEPTION(GOUROU_FILE_ERROR, "Unable to open " << path);
+
+	ByteArray privateLicenseKey = ByteArray::fromBase64(user->getPrivateLicenseKey());
+	/* In adobekey.py, we get base64 decoded data [26:] */
+	write(fd, privateLicenseKey.data()+26, privateLicenseKey.length()-1-26);
+	
+	close(fd);
     }
 
     int DRMProcessor::getLogLevel() {return (int)gourou::logLevel;}

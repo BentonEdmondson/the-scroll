@@ -6,13 +6,18 @@
   in {
     defaultPackage.x86_64-linux = nixpkgs.stdenv.mkDerivation {
       pname = "libgourou-utils";
-      version = "0.3.1";
+      version = "0.4";
       src = self;
 
       nativeBuildInputs = [ nixpkgs.pkg-config ];
 
       buildInputs = [ nixpkgs.openssl nixpkgs.qt5.qtbase nixpkgs.libzip nixpkgs.pugixml ];
   
+      buildPhase = ''
+        make -C lib/updfparser BUILD_STATIC=1 BUILD_SHARED=0
+        make
+      '';
+
       installPhase = ''
           mkdir -p $out/bin $out/lib
           cp libgourou.so $out/lib
