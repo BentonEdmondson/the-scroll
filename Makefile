@@ -55,6 +55,9 @@ libgourou: libgourou.a libgourou.so
 libgourou.a: $(OBJECTS)
 	$(AR) crs $@ obj/*.o $(LDFLAGS)
 
+$(UPDFPARSERLIB):
+	make -C lib/updfparser BUILD_STATIC=1 BUILD_SHARED=0
+
 libgourou.so: $(OBJECTS) $(UPDFPARSERLIB)
 	$(CXX) obj/*.o $(LDFLAGS) -o $@ -shared
 
@@ -64,6 +67,7 @@ build_utils:
 clean:
 	rm -rf libgourou.a libgourou.so obj
 	make -C utils clean
+	make -C lib/updfparser clean
 
 ultraclean: clean
 	rm -rf lib
