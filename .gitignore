@@ -7,3 +7,5 @@ utils/acsmdownloader
 utils/adept_activate
 utils/adept_remove
 .adept
+build
+result

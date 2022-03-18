@@ -1,0 +1,61 @@
+{
+  "nodes": {
+    "base64": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1468170709,
+        "narHash": "sha256-dt6i1j0rqH7lA+2XXp9KTEhj2GvYueyGrHh9VXBEsbw=",
+        "ref": "master",
+        "rev": "7d5a89229a525452e37504976a73c35fbaf2fe4d",
+        "revCount": 1,
+        "type": "git",
+        "url": "https://gist.github.com/f0fd86b6c73063283afe550bc5d77594.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://gist.github.com/f0fd86b6c73063283afe550bc5d77594.git"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1647297614,
+        "narHash": "sha256-ulGq3W5XsrBMU/u5k9d4oPy65pQTkunR4HKKtTq0RwY=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "73ad5f9e147c0d2a2061f1d4bd91e05078dc0b58",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "base64": "base64",
+        "nixpkgs": "nixpkgs",
+        "updfparser": "updfparser"
+      }
+    },
+    "updfparser": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1647424063,
+        "narHash": "sha256-9dvibKiUbbI4CrmuAaJzlpntT0XdLvdGeC2/WzjlA5U=",
+        "ref": "master",
+        "rev": "9d56c1d0b1ce81aae4c8db9d99a8b5d1f7967bcf",
+        "revCount": 25,
+        "type": "git",
+        "url": "git://soutade.fr/updfparser"
+      },
+      "original": {
+        "type": "git",
+        "url": "git://soutade.fr/updfparser"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
