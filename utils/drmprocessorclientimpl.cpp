@@ -25,17 +25,18 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#include <bytearray.h>
+
+#include <algorithm> 
+#include <cctype>
+#include <locale>
 
 #include <openssl/rand.h>
 #include <openssl/pkcs12.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
 
-#include <QCoreApplication>
-#include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QNetworkAccessManager>
-#include <QFile>
+#include <curl/curl.h>
 
 #include <zlib.h>
 #include <zip.h>
@@ -88,80 +89,190 @@ void DRMProcessorClientImpl::randBytes(unsigned char* bytesOut, unsigned int len
 }
 
 /* HTTP interface */
-#define DISPLAY_THRESHOLD 10*1024 // Threshold to display download progression
+#define HTTP_REQ_MAX_RETRY  5
+#define DISPLAY_THRESHOLD   10*1024 // Threshold to display download progression
+static unsigned downloadedBytes;
 
-static void downloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
-    // For "big" files only
-    if (bytesTotal >= DISPLAY_THRESHOLD && gourou::logLevel >= gourou::WARN)
+static int downloadProgress(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
+			    curl_off_t ultotal, curl_off_t ulnow)
+{
+// For "big" files only
+    if (dltotal >= DISPLAY_THRESHOLD && gourou::logLevel >= gourou::WARN)
     {
 	int percent = 0;
-	if (bytesTotal)
-	    percent = (bytesReceived * 100) / bytesTotal;
+	if (dltotal)
+	    percent = (dlnow * 100) / dltotal;
 
 	std::cout << "\rDownload " << percent << "%" << std::flush;
     }
+
+    return 0;
 }
 
-std::string DRMProcessorClientImpl::sendHTTPRequest(const std::string& URL, const std::string& POSTData, const std::string& contentType, std::map<std::string, std::string>* responseHeaders)
+static size_t curlRead(void *data, size_t size, size_t nmemb, void *userp)
 {
-    QNetworkRequest request(QUrl(URL.c_str()));
-    QNetworkAccessManager networkManager;
-    QByteArray replyData;
+    gourou::ByteArray* replyData = (gourou::ByteArray*) userp;
+    
+    replyData->append((unsigned char*)data, size*nmemb);
 
+    return size*nmemb;
+}
+
+static size_t curlReadFd(void *data, size_t size, size_t nmemb, void *userp)
+{
+    int fd = *(int*) userp;
+
+    size_t res = write(fd, data, size*nmemb);
+
+    downloadedBytes += res;
+
+    return res;
+}
+
+static size_t curlHeaders(char *buffer, size_t size, size_t nitems, void *userdata)
+{
+    std::map<std::string, std::string>* responseHeaders = (std::map<std::string, std::string>*)userdata;
+    std::string::size_type pos = 0;
+    std::string buf(buffer, size*nitems);
+
+    pos = buf.find(":", pos);
+
+    if (pos != std::string::npos)
+    {
+	std::string key   = std::string(buffer, pos);
+	std::string value = std::string(&buffer[pos+1], (size*nitems)-(pos+1));
+
+	key = gourou::trim(key);
+	value = gourou::trim(value);
+
+	(*responseHeaders)[key] = value;
+    
+	if (gourou::logLevel >= gourou::DEBUG)
+	    std::cout << key << " : "  << value << std::endl;
+    }
+    
+    return size*nitems;
+}
+
+std::string DRMProcessorClientImpl::sendHTTPRequest(const std::string& URL, const std::string& POSTData, const std::string& contentType, std::map<std::string, std::string>* responseHeaders, int fd, bool resume)
+{
+    gourou::ByteArray replyData;
+    std::map<std::string, std::string> localHeaders;
+
+    if (!responseHeaders)
+	responseHeaders = &localHeaders;
+    
     GOUROU_LOG(gourou::INFO, "Send request to " << URL);
     if (POSTData.size())
     {
 	GOUROU_LOG(gourou::DEBUG, "<<< " << std::endl << POSTData);
     }
-	
-    request.setRawHeader("Accept", "*/*");
-    request.setRawHeader("User-Agent", "book2png");
-    if (contentType.size())
-	request.setRawHeader("Content-Type", contentType.c_str());
 
-    QNetworkReply* reply;
+    unsigned prevDownloadedBytes;
+    downloadedBytes = 0;
+    if (fd && resume)
+    {
+	struct stat _stat;
+	if (!fstat(fd, &_stat))
+	{
+	    GOUROU_LOG(gourou::WARN, "Resume download @ " << _stat.st_size << " bytes");
+	    downloadedBytes = _stat.st_size;
+	}
+	else
+	    GOUROU_LOG(gourou::WARN, "Want to resume, but fstat failed");
+    }
+    
+    CURL *curl = curl_easy_init();
+    CURLcode res;
+    curl_easy_setopt(curl, CURLOPT_URL, URL.c_str());
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "book2png");
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
+
+    
+    struct curl_slist *list = NULL;
+    list = curl_slist_append(list, "Accept: */*");
+    std::string _contentType;
+    if (contentType.size())
+    {
+	_contentType = "Content-Type: " + contentType;
+	list = curl_slist_append(list, _contentType.c_str());
+    }
+
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
 
     if (POSTData.size())
-	reply = networkManager.post(request, POSTData.c_str());
-    else
-	reply = networkManager.get(request);
-
-    QEventLoop loop;
-
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    // Handled just below
-    QObject::connect(reply, &QNetworkReply::errorOccurred, &loop, &QEventLoop::quit);
-    QObject::connect(reply, &QNetworkReply::downloadProgress, &loop, downloadProgress);
-
-    loop.exec();
-    
-    QByteArray location = reply->rawHeader("Location");
-    if (location.size() != 0)
     {
-	GOUROU_LOG(gourou::DEBUG, "New location");
-	return sendHTTPRequest(location.constData(), POSTData, contentType, responseHeaders);
+	curl_easy_setopt(curl, CURLOPT_POST, 1L);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, POSTData.size());
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, POSTData.data());
     }
 
-    if (reply->error() != QNetworkReply::NoError)
-	EXCEPTION(gourou::CLIENT_NETWORK_ERROR, "Error " << reply->errorString().toStdString());
-
-    QList<QByteArray> headers = reply->rawHeaderList();
-    for (int i = 0; i < headers.size(); ++i) {
-	if (gourou::logLevel >= gourou::DEBUG)
-	    std::cout << headers[i].constData() << " : "  << reply->rawHeader(headers[i]).constData() << std::endl;
-	if (responseHeaders)
-	    (*responseHeaders)[headers[i].constData()] = reply->rawHeader(headers[i]).constData();
+    if (fd)
+    {
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlReadFd);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&fd);
+    }
+    else
+    {
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlRead);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&replyData);
     }
     
-    replyData = reply->readAll();
-    if (replyData.size() >= DISPLAY_THRESHOLD && gourou::logLevel >= gourou::WARN)
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curlHeaders);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void*)responseHeaders);
+    
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, downloadProgress);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
+
+    for (int i=0; i<HTTP_REQ_MAX_RETRY; i++)
+    {
+	prevDownloadedBytes = downloadedBytes;
+	if (downloadedBytes)
+	    curl_easy_setopt(curl, CURLOPT_RESUME_FROM, downloadedBytes);
+	    
+	res = curl_easy_perform(curl);
+
+	// Connexion failed, wait & retry
+	if (res == CURLE_COULDNT_CONNECT)
+	{
+	    GOUROU_LOG(gourou::WARN, "\nConnection failed, attempt " << (i+1) << "/" << HTTP_REQ_MAX_RETRY);	    
+	}
+	// Transfer failed but some data has been received
+	// --> try again without incrementing tries
+	else if (res == CURLE_RECV_ERROR)
+	{
+	    if (prevDownloadedBytes != downloadedBytes)
+	    {
+		GOUROU_LOG(gourou::WARN, "\nConnection broken, but data received, try again");	    
+		i--;
+	    }
+	    else
+		GOUROU_LOG(gourou::WARN, "\nConnection broken and no data received, attempt " << (i+1) << "/" << HTTP_REQ_MAX_RETRY);
+	}
+	// Other error --> fail
+	else
+	    break;
+
+	// Wait a little bit (250ms * i)
+	usleep((250 * 1000) * (i+1));
+    }
+    
+    curl_slist_free_all(list);
+    curl_easy_cleanup(curl);
+   
+    if (res != CURLE_OK)
+	EXCEPTION(gourou::CLIENT_NETWORK_ERROR, "Error " << curl_easy_strerror(res));
+    
+    if ((downloadedBytes >= DISPLAY_THRESHOLD || replyData.size() >= DISPLAY_THRESHOLD) &&
+	gourou::logLevel >= gourou::WARN)
 	std::cout << std::endl;
-    if (reply->rawHeader("Content-Type") == "application/vnd.adobe.adept+xml")
+
+    if ((*responseHeaders)["Content-Type"] == "application/vnd.adobe.adept+xml")
     {
 	GOUROU_LOG(gourou::DEBUG, ">>> " << std::endl << replyData.data());
     }
 	
-    return std::string(replyData.data(), replyData.length());
+    return std::string((char*)replyData.data(), replyData.length());
 }
 
 void DRMProcessorClientImpl::RSAPrivateEncrypt(const unsigned char* RSAKey, unsigned int RSAKeyLength,

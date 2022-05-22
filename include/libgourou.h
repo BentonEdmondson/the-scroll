@@ -40,7 +40,7 @@
 #define ACS_SERVER              "http://adeactivate.adobe.com/adept"
 #endif
 
-#define LIBGOUROU_VERSION       "0.5.3"
+#define LIBGOUROU_VERSION       "0.7.1"
 
 namespace gourou
 {
@@ -81,10 +81,11 @@ namespace gourou
 	 *
 	 * @param item            Item from fulfill() method
 	 * @param path            Output file path 
+	 * @param resume          false if target file should be truncated, true to try resume download
 	 *
 	 * @return Type of downloaded item
 	 */
-	ITEM_TYPE download(FulfillmentItem* item, std::string path);
+	ITEM_TYPE download(FulfillmentItem* item, std::string path, bool resume=false);
 
 	/**
 	 * @brief SignIn into ACS Server (required to activate device)
@@ -99,6 +100,14 @@ namespace gourou
 	 */
 	void activateDevice();
 
+	/**
+	 * @brief Return loaned book to server
+	 *
+	 * @param loanID          Loan ID received during fulfill
+	 * @param operatorURL     URL of operator that loans this book
+	 */
+	void returnLoan(const std::string& loanID, const std::string& operatorURL);
+	
 	/**
 	 * @brief Create a new ADEPT environment (device.xml, devicesalt and activation.xml).
 	 *
@@ -130,14 +139,16 @@ namespace gourou
 	/**
 	 * @brief Send HTTP (GET or POST) request
 	 *
-	 * @param URL            HTTP URL
-	 * @param POSTData       POST data if needed, if not set, a GET request is done
-	 * @param contentType    Optional content type of POST Data
+	 * @param URL             HTTP URL
+	 * @param POSTData        POST data if needed, if not set, a GET request is done
+	 * @param contentType     Optional content type of POST Data
 	 * @param responseHeaders Optional Response headers of HTTP request
+	 * @param fd              Optional File descriptor to write received data
+	 * @param resume          false if target file should be truncated, true to try resume download (works only in combination of a valid fd)
 	 *
 	 * @return data of HTTP response
 	 */
-	ByteArray sendRequest(const std::string& URL, const std::string& POSTData=std::string(), const char* contentType=0, std::map<std::string, std::string>* responseHeaders=0);
+	ByteArray sendRequest(const std::string& URL, const std::string& POSTData=std::string(), const char* contentType=0, std::map<std::string, std::string>* responseHeaders=0, int fd=0, bool resume=false);
 
 	/**
 	 * @brief Send HTTP POST request to URL with document as POSTData
@@ -207,7 +218,7 @@ namespace gourou
 	void pushTag(void* sha_ctx, uint8_t tag);
 	void hashNode(const pugi::xml_node& root, void *sha_ctx, std::map<std::string,std::string> nsHash);
 	void hashNode(const pugi::xml_node& root, unsigned char* sha_out);
-	std::string signNode(const pugi::xml_node& rootNode);
+	void signNode(pugi::xml_node& rootNode);
 	void addNonce(pugi::xml_node& root);
 	void buildAuthRequest(pugi::xml_document& authReq);
 	void buildInitLicenseServiceRequest(pugi::xml_document& initLicReq, std::string operatorURL);
@@ -215,6 +226,7 @@ namespace gourou
 	void operatorAuth(std::string operatorURL);
 	void buildFulfillRequest(pugi::xml_document& acsmDoc, pugi::xml_document& fulfillReq);
 	void buildActivateReq(pugi::xml_document& activateReq);
+	void buildReturnReq(pugi::xml_document& returnReq, const std::string& loanID, const std::string& operatorURL);
 	ByteArray sendFulfillRequest(const pugi::xml_document& document, const std::string& url);
 	void buildSignInRequest(pugi::xml_document& signInRequest, const std::string& adobeID, const std::string& adobePassword, const std::string& authenticationCertificate);
 	void fetchLicenseServiceCertificate(const std::string& licenseURL,

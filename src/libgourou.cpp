@@ -236,7 +236,7 @@ namespace gourou
 	}
     }
 
-    std::string DRMProcessor::signNode(const pugi::xml_node& rootNode)
+    void DRMProcessor::signNode(pugi::xml_node& rootNode)
     {
 	// Compute hash
 	unsigned char sha_out[SHA1_LEN];
@@ -260,9 +260,8 @@ namespace gourou
 	    printf("\n");
 	}
 
-	ByteArray signature(res, sizeof(res));
-
-	return signature.toBase64();
+	std::string signature = ByteArray(res, sizeof(res)).toBase64();
+	appendTextElem(rootNode, "adept:signature", signature);
     }
 
     void DRMProcessor::addNonce(pugi::xml_node& root)
@@ -300,12 +299,14 @@ namespace gourou
 	appendTextElem(root, "adept:expiration", buffer);
     }
     
-    ByteArray DRMProcessor::sendRequest(const std::string& URL, const std::string& POSTdata, const char* contentType, std::map<std::string, std::string>* responseHeaders)
+    ByteArray DRMProcessor::sendRequest(const std::string& URL, const std::string& POSTdata, const char* contentType, std::map<std::string, std::string>* responseHeaders, int fd, bool resume)
     {
 	if (contentType == 0)
 	    contentType = "";
-	std::string reply = client->sendHTTPRequest(URL, POSTdata, contentType, responseHeaders);
+	std::string reply = client->sendHTTPRequest(URL, POSTdata, contentType, responseHeaders, fd, resume);
 
+	if (fd) return ByteArray();
+	
 	pugi::xml_document replyDoc;
 	replyDoc.load_buffer(reply.c_str(), reply.length());
 
@@ -366,8 +367,7 @@ namespace gourou
 	addNonce(root);
 	appendTextElem(root, "adept:user",        user->getUUID());
 
-	std::string signature = signNode(root);
-	appendTextElem(root, "adept:signature",   signature);
+	signNode(root);
     }
     
     void DRMProcessor::doOperatorAuth(std::string operatorURL)
@@ -528,12 +528,10 @@ namespace gourou
 	
 	hmacParentNode.remove_child(hmacNode);
 
-	std::string signature = signNode(rootNode);
+	signNode(rootNode);
 	
 	// Add removed HMAC
 	appendTextElem(hmacParentNode, hmacNode.name(), hmacNode.first_child().value());
-	
-	appendTextElem(rootNode, "adept:signature", signature);
 
 	pugi::xpath_node node = acsmDoc.select_node("//operatorURL");
 	if (!node)
@@ -581,7 +579,7 @@ namespace gourou
 	return new FulfillmentItem(fulfillReply, user);
     }
 
-    DRMProcessor::ITEM_TYPE DRMProcessor::download(FulfillmentItem* item, std::string path)
+    DRMProcessor::ITEM_TYPE DRMProcessor::download(FulfillmentItem* item, std::string path, bool resume)
     {
 	ITEM_TYPE res = EPUB;
 	
@@ -589,10 +587,12 @@ namespace gourou
 	    EXCEPTION(DW_NO_ITEM, "No item");
 
 	std::map<std::string, std::string> headers;
-	
-	ByteArray replyData = sendRequest(item->getDownloadURL(), "", 0, &headers);
 
-	writeFile(path, replyData);
+	int fd = createNewFile(path, !resume);
+	
+	sendRequest(item->getDownloadURL(), "", 0, &headers, fd, resume);
+
+	close(fd);
 
 	GOUROU_LOG(INFO, "Download into " << path);
 
@@ -667,7 +667,10 @@ namespace gourou
 	pugi::xml_node signIn = signInRequest.append_child("adept:signIn");
 	signIn.append_attribute("xmlns:adept") = ADOBE_ADEPT_NS;
 	std::string loginMethod = user->getLoginMethod();
-	if (loginMethod.size())
+
+	if (adobeID == "anonymous")
+	    signIn.append_attribute("method") = "anonymous";
+	else if (loginMethod.size())
 	    signIn.append_attribute("method") = loginMethod.c_str();
 	else
 	    signIn.append_attribute("method") = "AdobeID";
@@ -816,10 +819,7 @@ namespace gourou
 
 	pugi::xml_node root = activateReq.select_node("adept:activate").node();
 
-	std::string signature = signNode(root);
-
-	root = activateReq.select_node("adept:activate").node();
-	appendTextElem(root, "adept:signature", signature);
+	signNode(root);
 
 	pugi::xml_document activationDoc;
 	user->readActivation(activationDoc);
@@ -837,6 +837,33 @@ namespace gourou
 	user->updateActivationFile(activationDoc);
     }
     
+    void DRMProcessor::buildReturnReq(pugi::xml_document& returnReq, const std::string& loanID, const std::string& operatorURL)
+    {
+	pugi::xml_node decl = returnReq.append_child(pugi::node_declaration);
+	decl.append_attribute("version") = "1.0";
+	
+	pugi::xml_node root = returnReq.append_child("adept:loanReturn");
+	root.append_attribute("xmlns:adept") = ADOBE_ADEPT_NS;
+
+	appendTextElem(root, "adept:user",      user->getUUID());
+	appendTextElem(root, "adept:device",    user->getDeviceUUID());
+	appendTextElem(root, "adept:loan",      loanID);
+
+	addNonce(root);
+	signNode(root);
+    }
+    
+    void DRMProcessor::returnLoan(const std::string& loanID, const std::string& operatorURL)
+    {
+	pugi::xml_document returnReq;
+
+	GOUROU_LOG(INFO, "Return loan " << loanID);
+
+	buildReturnReq(returnReq, loanID, operatorURL);
+
+	sendRequest(returnReq, operatorURL + "/LoanReturn");
+    }
+
     ByteArray DRMProcessor::encryptWithDeviceKey(const unsigned char* data, unsigned int len)
     {
 	const unsigned char* deviceKey = device->getDeviceKey();

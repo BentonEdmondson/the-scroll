@@ -26,21 +26,17 @@
   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <unistd.h>
 #include <getopt.h>
+#include <libgen.h>
 
 #include <iostream>
-
-#include <QFile>
-#include <QDir>
-#include <QCoreApplication>
-#include <QRunnable>
-#include <QThreadPool>
+#include <algorithm>
 
 #include <libgourou.h>
-#include "drmprocessorclientimpl.h"
+#include <libgourou_common.h>
 
-#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof(arr[0]))
+#include "drmprocessorclientimpl.h"
+#include "utils_common.h"
 
 static const char* deviceFile     = "device.xml";
 static const char* activationFile = "activation.xml";
@@ -49,28 +45,18 @@ static const char* acsmFile       = 0;
 static       bool  exportPrivateKey = false;
 static const char* outputFile     = 0;
 static const char* outputDir      = 0;
-static const char* defaultDirs[]  = {
-    ".adept/",
-    "./adobe-digital-editions/",
-    "./.adobe-digital-editions/"
-};
+static       bool  resume         = false;
 
 
-class ACSMDownloader: public QRunnable
+class ACSMDownloader
 {
 public:
-    ACSMDownloader(QCoreApplication* app):
-	app(app)
-    {
-	setAutoDelete(false);
-    }
-   
-    void run()
+    
+    int run()
     {
 	int ret = 0;
 	try
 	{
-	    DRMProcessorClientImpl client;
 	    gourou::DRMProcessor processor(&client, deviceFile, activationFile, devicekeyFile);
 	    gourou::User* user = processor.getUser();
 	    
@@ -84,9 +70,8 @@ public:
 	    
 		if (outputDir)
 		{
-		    QDir dir(outputDir);
-		    if (!dir.exists(outputDir))
-			dir.mkpath(outputDir);
+		    if (!fileExists(outputDir))
+			mkpath(outputDir);
 		    
 		    filename = std::string(outputDir) + "/" + filename;
 		}
@@ -116,14 +101,13 @@ public:
 	    
 		if (outputDir)
 		{
-		    QDir dir(outputDir);
-		    if (!dir.exists(outputDir))
-			dir.mkpath(outputDir);
+		    if (!fileExists(outputDir))
+			mkpath(outputDir);
 
 		    filename = std::string(outputDir) + "/" + filename;
 		}
 	    
-		gourou::DRMProcessor::ITEM_TYPE type = processor.download(item, filename);
+		gourou::DRMProcessor::ITEM_TYPE type = processor.download(item, filename, resume);
 
 		if (!outputFile)
 		{
@@ -132,11 +116,12 @@ public:
 			finalName += ".pdf";
 		    else
 			finalName += ".epub";
-		    QDir dir;
-		    dir.rename(filename.c_str(), finalName.c_str());
+		    rename(filename.c_str(), finalName.c_str());
 		    filename = finalName;
 		}
 		std::cout << "Created " << filename << std::endl;
+
+		serializeLoanToken(item);
 	    }
 	} catch(std::exception& e)
 	{
@@ -144,43 +129,62 @@ public:
 	    ret = 1;
 	}
 
-	this->app->exit(ret);
+	return ret;
     }
 
+    void serializeLoanToken(gourou::FulfillmentItem* item)
+    {
+	gourou::LoanToken* token = item->getLoanToken();
+
+	// No loan token available
+	if (!token)
+	    return;
+
+	pugi::xml_document doc;
+
+	pugi::xml_node decl = doc.append_child(pugi::node_declaration);
+	decl.append_attribute("version") = "1.0";
+
+	pugi::xml_node root = doc.append_child("loanToken");
+	gourou::appendTextElem(root, "id",          (*token)["id"]);
+	gourou::appendTextElem(root, "operatorURL", (*token)["operatorURL"]);
+	gourou::appendTextElem(root, "validity",    (*token)["validity"]);
+	gourou::appendTextElem(root, "name",        item->getMetadata("title"));
+
+	char * activationDir = strdup(deviceFile);
+	activationDir = dirname(activationDir);
+		
+	gourou::StringXMLWriter xmlWriter;
+	doc.save(xmlWriter, "  ");
+	std::string xmlStr = xmlWriter.getResult();
+
+	// Use first bytes of SHA1(id) as filename
+	unsigned char sha1[gourou::SHA1_LEN];
+	client.digest("SHA1", (unsigned char*)(*token)["id"].c_str(), (*token)["id"].size(), sha1);
+	gourou::ByteArray tmp(sha1, sizeof(sha1));
+	std::string filenameHex = tmp.toHex();
+	std::string filename(filenameHex.c_str(), ID_HASH_SIZE);
+	std::string fullPath = std::string(activationDir);
+	fullPath += std::string ("/") + std::string(LOANS_DIR);
+	mkpath(fullPath.c_str());
+	fullPath += filename + std::string(".xml");
+	gourou::writeFile(fullPath, xmlStr);
+
+	std::cout << "Loan token serialized into " << fullPath << std::endl;
+
+	free(activationDir);
+    }
+    
 private:
-    QCoreApplication* app;
+    DRMProcessorClientImpl client;
 };	      
 
-static const char* findFile(const char* filename, bool inDefaultDirs=true)
-{
-    QFile file(filename);
-
-    if (file.exists())
-	return strdup(filename);
-
-    if (!inDefaultDirs) return 0;
-    
-    for (int i=0; i<(int)ARRAY_SIZE(defaultDirs); i++)
-    {
-	QString path = QString(defaultDirs[i]) + QString(filename);
-	file.setFileName(path);
-	if (file.exists())
-	    return strdup(path.toStdString().c_str());
-    }
-    
-    return 0;
-}
-
-static void version(void)
-{
-    std::cout << "Current libgourou version : " << gourou::DRMProcessor::VERSION << std::endl ;
-}
 
 static void usage(const char* cmd)
 {
     std::cout << "Download EPUB file from ACSM request file" << std::endl;
     
-    std::cout << "Usage: " << cmd << " [(-d|--device-file) device.xml] [(-a|--activation-file) activation.xml] [(-k|--device-key-file) devicesalt] [(-O|--output-dir) dir] [(-o|--output-file) output(.epub|.pdf|.der)] [(-v|--verbose)] [(-h|--help)] (-f|--acsm-file) file.acsm|(-e|--export-private-key)" << std::endl << std::endl;
+    std::cout << "Usage: " << cmd << " [(-d|--device-file) device.xml] [(-a|--activation-file) activation.xml] [(-k|--device-key-file) devicesalt] [(-O|--output-dir) dir] [(-o|--output-file) output(.epub|.pdf|.der)] [(-r|--resume)] [(-v|--verbose)] [(-h|--help)] (-f|--acsm-file) file.acsm|(-e|--export-private-key)" << std::endl << std::endl;
     
     std::cout << "  " << "-d|--device-file"     << "\t"   << "device.xml file from eReader" << std::endl;
     std::cout << "  " << "-a|--activation-file" << "\t"   << "activation.xml file from eReader" << std::endl;
@@ -189,6 +193,7 @@ static void usage(const char* cmd)
     std::cout << "  " << "-o|--output-file"     << "\t"   << "Optional output filename (default <title.(epub|pdf|der)>)" << std::endl;
     std::cout << "  " << "-f|--acsm-file"       << "\t"   << "ACSM request file for epub download" << std::endl;
     std::cout << "  " << "-e|--export-private-key"<< "\t" << "Export private key in DER format" << std::endl;
+    std::cout << "  " << "-r|--resume"          << "\t\t" << "Try to resume download (in case of previous failure)" << std::endl;
     std::cout << "  " << "-v|--verbose"         << "\t\t" << "Increase verbosity, can be set multiple times" << std::endl;
     std::cout << "  " << "-V|--version"         << "\t\t" << "Display libgourou version" << std::endl;
     std::cout << "  " << "-h|--help"            << "\t\t" << "This help" << std::endl;
@@ -218,13 +223,14 @@ int main(int argc, char** argv)
 	    {"output-file",      required_argument, 0,  'o' },
 	    {"acsm-file",        required_argument, 0,  'f' },
 	    {"export-private-key",no_argument,      0,  'e' },
+	    {"resume",           no_argument,       0,  'r' },
 	    {"verbose",          no_argument,       0,  'v' },
 	    {"version",          no_argument,       0,  'V' },
 	    {"help",             no_argument,       0,  'h' },
 	    {0,                  0,                 0,  0 }
 	};
 
-	c = getopt_long(argc, argv, "d:a:k:O:o:f:evVh",
+	c = getopt_long(argc, argv, "d:a:k:O:o:f:ervVh",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -251,6 +257,9 @@ int main(int argc, char** argv)
 	case 'e':
 	    exportPrivateKey = true;
 	    break;
+	case 'r':
+	    resume = true;
+	    break;
 	case 'v':
 	    verbose++;
 	    break;
@@ -275,8 +284,7 @@ int main(int argc, char** argv)
 	return -1;
     }
 
-    QCoreApplication app(argc, argv);
-    ACSMDownloader downloader(&app);
+    ACSMDownloader downloader;
 
     int i;
     bool hasErrors = false;
@@ -306,8 +314,7 @@ int main(int argc, char** argv)
     }
     else
     {
-	QFile file(acsmFile);
-	if (!file.exists())
+	if (!fileExists(acsmFile))
 	{
 	    std::cout << "Error : " << acsmFile << " doesn't exists" << std::endl;
 	    ret = -1;
@@ -315,9 +322,7 @@ int main(int argc, char** argv)
 	}
     }
     
-    QThreadPool::globalInstance()->start(&downloader);
-
-    ret = app.exec();
+    ret = downloader.run();
 
 end:
     for (i=0; i<(int)ARRAY_SIZE(files); i++)

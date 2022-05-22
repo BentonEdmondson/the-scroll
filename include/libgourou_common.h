@@ -55,7 +55,8 @@ namespace gourou
 	GOUROU_INVALID_CLIENT,
 	GOUROU_TAG_NOT_FOUND,
 	GOUROU_ADEPT_ERROR,
-	GOUROU_FILE_ERROR
+	GOUROU_FILE_ERROR,
+	GOUROU_INVALID_PROPERTY
     };
 
     enum FULFILL_ERROR {
@@ -96,7 +97,8 @@ namespace gourou
     };
 
     enum FULFILL_ITEM_ERROR {
-	FFI_INVALID_FULFILLMENT_DATA = 0x4000
+	FFI_INVALID_FULFILLMENT_DATA = 0x4000,
+	FFI_INVALID_LOAN_TOKEN
     };
     
     enum CLIENT_ERROR {
@@ -111,7 +113,8 @@ namespace gourou
 	CLIENT_ZIP_ERROR,
 	CLIENT_GENERIC_EXCEPTION,
 	CLIENT_NETWORK_ERROR,
-	CLIENT_INVALID_PKCS8
+	CLIENT_INVALID_PKCS8,
+	CLIENT_FILE_ERROR
     };
 
     enum DRM_REMOVAL_ERROR {
@@ -286,15 +289,33 @@ namespace gourou
     }
 
     /**
-     * @brief Write data in a file. If it already exists, it's truncated
+     * @brief Open a file descriptor on path. If it already exists and truncate == true, it's truncated
+     *
+     * @return Created fd, must be closed
      */
-    static inline void writeFile(std::string path, const unsigned char* data, unsigned int length)
+    static inline int createNewFile(std::string path, bool truncate=true)
     {
-	int fd = open(path.c_str(), O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
+	int options = O_CREAT|O_WRONLY;
+	if (truncate)
+	    options |= O_TRUNC;
+	else
+	    options |= O_APPEND;
+
+	int fd = open(path.c_str(), options, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
 
 	if (fd <= 0)
 	    EXCEPTION(GOUROU_FILE_ERROR, "Unable to create " << path);
 
+	return fd;
+    }
+    
+    /**
+     * @brief Write data in a file. If it already exists, it's truncated
+     */
+    static inline void writeFile(std::string path, const unsigned char* data, unsigned int length)
+    {
+	int fd = createNewFile(path);
+	
 	if (write(fd, data, length) != length)
 	    EXCEPTION(GOUROU_FILE_ERROR, "Write error for file " << path);
 
