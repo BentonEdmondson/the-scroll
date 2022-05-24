@@ -17,7 +17,7 @@
     in {
         defaultPackage.x86_64-linux = nixpkgs.stdenv.mkDerivation {
             pname = "the-scroll";
-            version = "0.5.3";
+            version = "0.7.1";
             src = [
                 self
                 updfparser
@@ -27,12 +27,13 @@
                 nixpkgs.pkg-config
                 nixpkgs.meson
                 nixpkgs.ninja
+                nixpkgs.cmake
             ];
             buildInputs = [
                 nixpkgs.openssl
-                nixpkgs.qt5.qtbase
                 nixpkgs.libzip
                 nixpkgs.pugixml
+                nixpkgs.curl
             ];
             unpackPhase = ''
                 mkdir -p lib/updfparser lib/base64
@@ -54,7 +55,6 @@
                 cp gourou-download $out/bin
                 cp gourou-dedrm $out/bin
             '';
-            dontWrapQtApps = true;
         };
     };
 }
